@@ -16,11 +16,11 @@ app.post("/chat", async (req, res) => {
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
       {
-        model: "gpt-4", // <- GPT-4 model enabled
+        model: "gpt-4", // <-- switch here if needed
         messages: [
           {
             role: "system",
-            content: "You are GPT-4. Respond concisely and accurately. Identify yourself truthfully if asked."
+            content: "You are GPT-4. If asked, clearly identify yourself as GPT-4. Do not say you are ChatGPT 3 or 3.5."
           },
           {
             role: "user",
@@ -31,21 +31,22 @@ app.post("/chat", async (req, res) => {
       },
       {
         headers: {
-          "Authorization": `Bearer ${OPENAI_KEY}`,
+          Authorization: `Bearer ${OPENAI_KEY}`,
           "Content-Type": "application/json"
         }
       }
     );
 
     const reply = response.data.choices[0].message.content;
-    res.json({ reply });
+    const modelUsed = response.data.model; // ← OpenAI confirms this
+    res.json({ reply: `[${modelUsed}]\n${reply}` });
   } catch (error) {
     console.error("OpenAI error:", error.response?.data || error.message);
     res.status(500).json({ error: "Failed to contact OpenAI" });
   }
 });
 
-app.get("/", (req, res) => {
+app.get("/", (_, res) => {
   res.send("ChatGPT backend is running ✅");
 });
 
