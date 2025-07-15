@@ -8,10 +8,11 @@ app.use(cors());
 app.use(bodyParser.json());
 
 const configuration = new Configuration({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: process.env.OPENAI_API_KEY, // Make sure this is set in your Render environment variables
 });
 const openai = new OpenAIApi(configuration);
 
+// Memory storage (in-memory only)
 const playerMemory = {};
 
 app.post("/chat", async (req, res) => {
@@ -21,52 +22,58 @@ app.post("/chat", async (req, res) => {
     return res.status(400).json({ error: "Missing message or playerId" });
   }
 
-  // Format local time
   const offsetMinutes = parseInt(timeZoneOffset || 0);
   const nowUtc = new Date();
   const localTime = new Date(nowUtc.getTime() + offsetMinutes * 60 * 1000);
-  const contextTime = `The current local time is ${localTime.toLocaleTimeString()} on ${localTime.toDateString()}.`;
+  const contextTime = `Local time: ${localTime.toLocaleTimeString()} on ${localTime.toDateString()}`;
 
-  // Maintain last 5 memory items
-  if (!playerMemory[playerId]) playerMemory[playerId] = [];
-  const memory = playerMemory[playerId];
-
-  if (message:lower():find("remember") and #memory < 5) {
-    const remembered = message:match("remember%s+(.+)")
-    if remembered then
-      table.insert(memory, remembered)
-      return res.json({ reply: `ChatGPT will remember: "${remembered}"` });
-    end
+  // Init memory if missing
+  if (!playerMemory[playerId]) {
+    playerMemory[playerId] = [];
   }
 
-  if (#memory >= 5) {
+  const memory = playerMemory[playerId];
+
+  // Handle "remember" command
+  if (message.toLowerCase().includes("remember") && memory.length < 5) {
+    const match = message.match(/remember\s+(.+)/i);
+    if (match && match[1]) {
+      memory.push(match[1]);
+      return res.json({ reply: `ChatGPT will remember: "${match[1]}"` });
+    }
+  }
+
+  // Memory full error
+  if (memory.length >= 5) {
     return res.json({ reply: "⚠️ Error Code M1: Memory full. Please come back after a memory wipe." });
   }
 
-  // Build chat prompt
-  const prompt = [
+  const messages = [
     {
       role: "system",
-      content: `You are ChatGPT in a Roblox game. Respond conversationally. ${contextTime}`,
+      content: `You are ChatGPT inside a Roblox game. Be friendly and helpful. ${contextTime}`,
     },
-    ...memory.map(mem => ({ role: "system", content: "Remembered: " + mem })),
-    { role: "user", content: message }
+    ...memory.map((mem) => ({ role: "system", content: "Remembered: " + mem })),
+    {
+      role: "user",
+      content: message,
+    },
   ];
 
   try {
     const completion = await openai.createChatCompletion({
-      model: "gpt-4-1106-preview",
-      messages: prompt,
+      model: "gpt-4-1106-preview", // GPT-4.1
+      messages: messages,
     });
 
     const reply = completion.data.choices[0].message.content;
     res.json({ reply });
-  } catch (err) {
-    console.error("ChatGPT error:", err.message);
-    res.status(500).json({ error: "Failed to contact ChatGPT" });
+  } catch (error) {
+    console.error("ChatGPT error:", error.message);
+    res.status(500).json({ error: "ChatGPT failed" });
   }
 });
 
 app.listen(3000, () => {
-  console.log("✅ GPT-4.1 backend running on port 3000");
+  console.log("✅ GPT backend running on port 3000");
 });
