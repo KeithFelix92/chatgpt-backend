@@ -1,18 +1,17 @@
 import express from "express";
 import cors from "cors";
 import bodyParser from "body-parser";
-import { Configuration, OpenAIApi } from "openai";
+import OpenAI from "openai";
 
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
-const configuration = new Configuration({
+const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
-const openai = new OpenAIApi(configuration);
 
-// Simple in-memory player memory
+// In-memory player memory
 const playerMemory = {};
 
 app.post("/chat", async (req, res) => {
@@ -30,7 +29,6 @@ app.post("/chat", async (req, res) => {
   if (!playerMemory[playerId]) {
     playerMemory[playerId] = [];
   }
-
   const memory = playerMemory[playerId];
 
   if (message.toLowerCase().includes("remember") && memory.length < 5) {
@@ -42,7 +40,7 @@ app.post("/chat", async (req, res) => {
   }
 
   if (memory.length >= 5) {
-    return res.json({ reply: "⚠️ Error Code M1: Memory full. Please come back after a memory wipe." });
+    return res.json({ reply: "Error Code M1: Memory full. Please come back after a memory wipe." });
   }
 
   const messages = [
@@ -58,12 +56,12 @@ app.post("/chat", async (req, res) => {
   ];
 
   try {
-    const completion = await openai.createChatCompletion({
-      model: "gpt-4-1106-preview",
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
       messages: messages,
     });
 
-    const reply = completion.data.choices[0].message.content;
+    const reply = completion.choices[0].message.content;
     res.json({ reply });
   } catch (error) {
     console.error("ChatGPT error:", error.message);
@@ -72,5 +70,5 @@ app.post("/chat", async (req, res) => {
 });
 
 app.listen(3000, () => {
-  console.log("✅ GPT backend running on port 3000");
+  console.log("GPT backend running on port 3000");
 });
