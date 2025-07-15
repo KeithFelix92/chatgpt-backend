@@ -26,7 +26,7 @@ function startSession(playerId) {
     chatHistory: [
       {
         role: "system",
-        content: `You are GPT-4. Remember the player’s tone and facts.`
+        content: `You are GPT-4.1. Remember the player’s tone and facts.`
       },
       {
         role: "system",
@@ -49,7 +49,7 @@ async function extractFactFromMessage(playerId, messageText) {
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
       {
-        model: "gpt-4",
+        model: "gpt-4.1",
         messages: [
           {
             role: "system",
