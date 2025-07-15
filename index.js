@@ -10,15 +10,11 @@ app.use(bodyParser.json());
 
 const OPENAI_KEY = process.env.OPENAI_KEY;
 const MAX_MEMORY_ITEMS = 5;
-
-// In-memory per-player sessions
-const sessions = {};
+const sessions = {}; // Per-player memory
 
 function getContextInfo() {
   const now = new Date();
-  const dateStr = now.toDateString();
-  const timeStr = now.toLocaleTimeString();
-  return `Current date is ${dateStr}. Current time is ${timeStr}.`;
+  return `Date: ${now.toDateString()}. Time: ${now.toLocaleTimeString()}.`;
 }
 
 function startSession(playerId) {
@@ -26,7 +22,7 @@ function startSession(playerId) {
     chatHistory: [
       {
         role: "system",
-        content: `You are GPT-4.1. Remember the player’s tone and facts.`
+        content: "You are GPT-4.1 (gpt-4o). You remember this player's chat session and extract facts."
       },
       {
         role: "system",
@@ -49,17 +45,16 @@ async function extractFactFromMessage(playerId, messageText) {
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
       {
-        model: "gpt-4.1",
+        model: "gpt-4o",
         messages: [
           {
             role: "system",
-            content:
-              "Extract a minor but important fact from this message. Keep it short, only include something the assistant should remember."
+            content: "Extract one small but useful fact from this message to remember. Keep it short."
           },
           { role: "user", content: messageText }
         ],
-        max_tokens: 30,
-        temperature: 0.3
+        temperature: 0.3,
+        max_tokens: 30
       },
       {
         headers: {
@@ -70,37 +65,33 @@ async function extractFactFromMessage(playerId, messageText) {
     );
 
     const fact = response.data.choices[0].message.content.trim();
-
     if (fact && fact.length > 2) {
       const mem = sessions[playerId].memories;
-      if (mem.length >= MAX_MEMORY_ITEMS) mem.shift(); // remove oldest
+      if (mem.length >= MAX_MEMORY_ITEMS) mem.shift(); // Remove oldest
       mem.push(fact);
     }
   } catch (err) {
-    console.error("Fact extraction error:", err.message);
+    console.warn("Memory extract error:", err.message);
   }
 }
 
 async function summarizeSession(playerId) {
   if (!sessions[playerId]) return "No session found.";
 
-  const session = sessions[playerId];
-
   try {
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
       {
-        model: "gpt-4",
+        model: "gpt-4o",
         messages: [
           {
             role: "system",
-            content:
-              "Summarize the entire conversation from GPT’s perspective. Include personality traits, repeated phrases, and important facts. Be concise."
+            content: "Summarize this session from GPT's perspective, include the tone, patterns, and any facts learned."
           },
-          ...session.chatHistory
+          ...sessions[playerId].chatHistory
         ],
-        max_tokens: 300,
-        temperature: 0.6
+        temperature: 0.6,
+        max_tokens: 300
       },
       {
         headers: {
@@ -114,32 +105,24 @@ async function summarizeSession(playerId) {
     saveSummaryToFile(playerId, summary);
     return summary;
   } catch (error) {
-    console.error("Summary error:", error.message);
-    return "Failed to summarize session.";
+    return "Failed to generate summary.";
   }
 }
 
 function saveSummaryToFile(playerId, summary) {
-  if (!fs.existsSync("summaries")) {
-    fs.mkdirSync("summaries");
-  }
-
-  const filename = `summaries/${playerId}-${Date.now()}.txt`;
-  fs.writeFileSync(filename, summary);
+  if (!fs.existsSync("summaries")) fs.mkdirSync("summaries");
+  const fileName = `summaries/${playerId}-${Date.now()}.txt`;
+  fs.writeFileSync(fileName, summary);
 }
 
 app.post("/chat", async (req, res) => {
   const { playerId, message } = req.body;
+  if (!playerId || !message) return res.status(400).json({ error: "Missing playerId or message." });
 
-  if (!playerId || !message) {
-    return res.status(400).json({ error: "Missing playerId or message" });
-  }
-
-  startSession(playerId); // safe to call multiple times
+  startSession(playerId);
   addMessage(playerId, "user", message);
   await extractFactFromMessage(playerId, message);
 
-  // Add memory as context
   const memoryText = sessions[playerId].memories.join("; ");
   if (memoryText) {
     addMessage(playerId, "system", "Memories to keep in mind: " + memoryText);
@@ -149,7 +132,7 @@ app.post("/chat", async (req, res) => {
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
       {
-        model: "gpt-4",
+        model: "gpt-4o",
         messages: sessions[playerId].chatHistory,
         temperature: 0.7
       },
@@ -163,11 +146,9 @@ app.post("/chat", async (req, res) => {
 
     const gptReply = response.data.choices[0].message.content;
     addMessage(playerId, "assistant", gptReply);
-
-    return res.json({ reply: gptReply });
+    res.json({ reply: gptReply });
   } catch (err) {
-    console.error("GPT error:", err.message);
-    return res.status(500).json({ error: "GPT API failed" });
+    res.status(500).json({ error: "OpenAI failed." });
   }
 });
 
@@ -176,15 +157,14 @@ app.post("/playerLeft", async (req, res) => {
   if (!playerId) return res.status(400).json({ error: "Missing playerId" });
 
   const summary = await summarizeSession(playerId);
-  delete sessions[playerId]; // Clear from memory
-
+  delete sessions[playerId]; // Clean up
   res.json({ summary });
 });
 
 app.get("/", (_, res) => {
-  res.send("ChatGPT Backend with Memory & Session Summary ✅");
+  res.send("✅ ChatGPT 4.1 Backend with Player Memory and Summary Running");
 });
 
 app.listen(3000, () => {
-  console.log("Server running on port 3000");
+  console.log("✅ Server running on port 3000");
 });
