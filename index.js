@@ -4,6 +4,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { OpenAI } from "openai";
+import 'dotenv/config';
 
 const app = express();
 app.use(cors());
