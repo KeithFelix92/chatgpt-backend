@@ -1,74 +1,78 @@
 import express from "express";
 import cors from "cors";
-import bodyParser from "body-parser";
-import OpenAI from "openai";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import { OpenAI } from "openai";
 
 const app = express();
 app.use(cors());
-app.use(bodyParser.json());
+app.use(express.json());
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Folder where memory is stored
+const memoryDir = path.join(__dirname, "PublicUserPrivateData");
+if (!fs.existsSync(memoryDir)) {
+	fs.mkdirSync(memoryDir, { recursive: true });
+}
+
+// Initialize OpenAI with your key
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+	apiKey: process.env.OPENAI_API_KEY
 });
 
-// In-memory player memory
-const playerMemory = {};
-
+// Chat endpoint
 app.post("/chat", async (req, res) => {
-  const { message, playerId, timeZoneOffset } = req.body;
+	try {
+		const { message, playerId } = req.body;
 
-  if (!message || !playerId) {
-    return res.status(400).json({ error: "Missing message or playerId" });
-  }
+		// Load memory if it exists
+		const memoryFile = path.join(memoryDir, `${playerId}.txt`);
+		let memoryContext = "";
 
-  const offsetMinutes = parseInt(timeZoneOffset || 0);
-  const nowUtc = new Date();
-  const localTime = new Date(nowUtc.getTime() + offsetMinutes * 60 * 1000);
-  const contextTime = `Local time: ${localTime.toLocaleTimeString()} on ${localTime.toDateString()}`;
+		if (fs.existsSync(memoryFile)) {
+			memoryContext = fs.readFileSync(memoryFile, "utf8");
+		}
 
-  if (!playerMemory[playerId]) {
-    playerMemory[playerId] = [];
-  }
-  const memory = playerMemory[playerId];
+		// Build prompt
+		const messages = [
+			{ role: "system", content: `You are ChatGPT in a Roblox game. This is the memory of the player: ${memoryContext}` },
+			{ role: "user", content: message }
+		];
 
-  if (message.toLowerCase().includes("remember") && memory.length < 5) {
-    const match = message.match(/remember\s+(.+)/i);
-    if (match && match[1]) {
-      memory.push(match[1]);
-      return res.json({ reply: `ChatGPT will remember: "${match[1]}"` });
-    }
-  }
+		const response = await openai.chat.completions.create({
+			model: "gpt-4-1106-preview",
+			messages: messages,
+			temperature: 0.7
+		});
 
-  if (memory.length >= 5) {
-    return res.json({ reply: "Error Code M1: Memory full. Please come back after a memory wipe." });
-  }
+		const reply = response.choices[0].message.content;
+		res.json({ reply });
 
-  const messages = [
-    {
-      role: "system",
-      content: `You are ChatGPT inside a Roblox game. Be friendly and helpful. ${contextTime}`,
-    },
-    ...memory.map((mem) => ({ role: "system", content: "Remembered: " + mem })),
-    {
-      role: "user",
-      content: message,
-    },
-  ];
-
-  try {
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: messages,
-    });
-
-    const reply = completion.choices[0].message.content;
-    res.json({ reply });
-  } catch (error) {
-    console.error("ChatGPT error:", error.message);
-    res.status(500).json({ error: "ChatGPT failed" });
-  }
+	} catch (err) {
+		console.error("Chat error:", err);
+		res.status(500).json({ reply: "Sorry, something went wrong." });
+	}
 });
 
-app.listen(3000, () => {
-  console.log("GPT backend running on port 3000");
+// Save memory endpoint
+app.post("/memory", async (req, res) => {
+	try {
+		const { playerId, memory } = req.body;
+
+		const filePath = path.join(memoryDir, `${playerId}.txt`);
+		fs.writeFileSync(filePath, memory);
+
+		res.json({ status: "Saved" });
+	} catch (err) {
+		console.error("Memory save error:", err);
+		res.status(500).json({ error: "Failed to save memory" });
+	}
+});
+
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
+	console.log(`✅ Backend listening on port ${port}`);
 });
