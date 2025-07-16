@@ -1,12 +1,9 @@
-// index.js
+// chatgpt-backend/index.js
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import dotenv from 'dotenv';
 import { Configuration, OpenAIApi } from 'openai';
-
-dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,6 +12,11 @@ const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
+
+if (!process.env.OPENAI_API_KEY) {
+  console.error('ERROR: OPENAI_API_KEY environment variable is missing!');
+  process.exit(1);
+}
 
 const openai = new OpenAIApi(new Configuration({
   apiKey: process.env.OPENAI_API_KEY
@@ -25,6 +27,10 @@ const SERVER_DIR = path.join(__dirname, 'ServerStorageMemories');
 
 if (!fs.existsSync(PUBLIC_DIR)) fs.mkdirSync(PUBLIC_DIR);
 if (!fs.existsSync(SERVER_DIR)) fs.mkdirSync(SERVER_DIR);
+
+app.get('/', (req, res) => {
+  res.send('ChatGPT backend is running!');
+});
 
 app.get('/memory/:userId', (req, res) => {
   const filePath = path.join(PUBLIC_DIR, `${req.params.userId}.txt`);
@@ -48,23 +54,24 @@ app.post('/summarize/:userId', async (req, res) => {
     const completion = await openai.createChatCompletion({
       model: 'gpt-4o',
       messages: [
-        { role: 'system', content: "Summarize this player's chat history into a compact JSON format with useful minor facts and persistent preferences. Use concise keys." },
+        {
+          role: 'system',
+          content: "Summarize this player's chat history into a compact JSON format with useful minor facts and persistent preferences. Use concise keys."
+        },
         { role: 'user', content: rawMemory }
       ]
     });
 
     const summary = completion.data.choices[0].message.content.trim();
 
-    // Save readable text version
     fs.writeFileSync(path.join(PUBLIC_DIR, `${userId}.txt`), rawMemory, 'utf8');
 
-    // Parse and save JSON summary
     const safeJson = JSON.parse(summary);
     fs.writeFileSync(path.join(SERVER_DIR, `${userId}.json`), JSON.stringify(safeJson, null, 2));
 
     res.json({ status: 'Summarized and saved', summary: safeJson });
   } catch (err) {
-    console.error(err);
+    console.error('Summarization error:', err);
     res.status(500).json({ error: 'Summarization failed' });
   }
 });
@@ -85,11 +92,16 @@ app.post('/chat', async (req, res) => {
     const reply = completion.data.choices[0].message.content;
     res.json({ reply });
   } catch (err) {
-    console.error(err);
+    console.error('ChatGPT error:', err);
     res.status(500).json({ error: 'ChatGPT error' });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
-});
+try {
+  app.listen(PORT, () => {
+    console.log(`✅ Server running on port ${PORT}`);
+  });
+} catch (err) {
+  console.error('Server failed to start:', err);
+  process.exit(1);
+}
