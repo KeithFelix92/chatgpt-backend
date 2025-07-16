@@ -1,14 +1,19 @@
 // index.js
-const express = require('express');
-const fs = require('fs');
-const path = require('path');
-const { Configuration, OpenAIApi } = require('openai');
-require('dotenv').config();
+import express from 'express';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
+import { Configuration, OpenAIApi } from 'openai';
+
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(express.json());
 
-// Only one PORT declaration here:
 const PORT = process.env.PORT || 10000;
 
 const openai = new OpenAIApi(new Configuration({
@@ -21,7 +26,6 @@ const SERVER_DIR = path.join(__dirname, 'ServerStorageMemories');
 if (!fs.existsSync(PUBLIC_DIR)) fs.mkdirSync(PUBLIC_DIR);
 if (!fs.existsSync(SERVER_DIR)) fs.mkdirSync(SERVER_DIR);
 
-// Get raw memory
 app.get('/memory/:userId', (req, res) => {
   const filePath = path.join(PUBLIC_DIR, `${req.params.userId}.txt`);
   if (fs.existsSync(filePath)) {
@@ -30,14 +34,12 @@ app.get('/memory/:userId', (req, res) => {
   res.json({ memory: '' });
 });
 
-// Post raw memory
 app.post('/memory/:userId', (req, res) => {
   const filePath = path.join(PUBLIC_DIR, `${req.params.userId}.txt`);
   fs.writeFileSync(filePath, req.body.memory || '', 'utf8');
   res.json({ status: 'Memory saved' });
 });
 
-// Summarize and save as JSON
 app.post('/summarize/:userId', async (req, res) => {
   const userId = req.params.userId;
   const rawMemory = req.body.memory || '';
@@ -67,7 +69,6 @@ app.post('/summarize/:userId', async (req, res) => {
   }
 });
 
-// Chat endpoint
 app.post('/chat', async (req, res) => {
   const { userId, message, memory } = req.body;
 
