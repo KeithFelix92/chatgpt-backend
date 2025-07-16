@@ -1,3 +1,4 @@
+// index.js
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
@@ -7,19 +8,20 @@ require('dotenv').config();
 const app = express();
 app.use(express.json());
 
+// Only one PORT declaration here:
 const PORT = process.env.PORT || 10000;
 
 const openai = new OpenAIApi(new Configuration({
   apiKey: process.env.OPENAI_API_KEY
 }));
 
-// Directories for memory storage
 const PUBLIC_DIR = path.join(__dirname, 'PublicUserPrivateData');
 const SERVER_DIR = path.join(__dirname, 'ServerStorageMemories');
+
 if (!fs.existsSync(PUBLIC_DIR)) fs.mkdirSync(PUBLIC_DIR);
 if (!fs.existsSync(SERVER_DIR)) fs.mkdirSync(SERVER_DIR);
 
-// GET raw memory
+// Get raw memory
 app.get('/memory/:userId', (req, res) => {
   const filePath = path.join(PUBLIC_DIR, `${req.params.userId}.txt`);
   if (fs.existsSync(filePath)) {
@@ -28,14 +30,14 @@ app.get('/memory/:userId', (req, res) => {
   res.json({ memory: '' });
 });
 
-// POST raw memory
+// Post raw memory
 app.post('/memory/:userId', (req, res) => {
   const filePath = path.join(PUBLIC_DIR, `${req.params.userId}.txt`);
   fs.writeFileSync(filePath, req.body.memory || '', 'utf8');
   res.json({ status: 'Memory saved' });
 });
 
-// POST summarize memory and save as JSON
+// Summarize and save as JSON
 app.post('/summarize/:userId', async (req, res) => {
   const userId = req.params.userId;
   const rawMemory = req.body.memory || '';
@@ -54,8 +56,8 @@ app.post('/summarize/:userId', async (req, res) => {
     // Save readable text version
     fs.writeFileSync(path.join(PUBLIC_DIR, `${userId}.txt`), rawMemory, 'utf8');
 
-    // Save JSON summary to ServerStorageMemories
-    const safeJson = JSON.parse(summary); // ensure it's valid JSON
+    // Parse and save JSON summary
+    const safeJson = JSON.parse(summary);
     fs.writeFileSync(path.join(SERVER_DIR, `${userId}.json`), JSON.stringify(safeJson, null, 2));
 
     res.json({ status: 'Summarized and saved', summary: safeJson });
@@ -65,14 +67,15 @@ app.post('/summarize/:userId', async (req, res) => {
   }
 });
 
-// Main chat route
+// Chat endpoint
 app.post('/chat', async (req, res) => {
   const { userId, message, memory } = req.body;
+
   try {
     const completion = await openai.createChatCompletion({
       model: 'gpt-4o',
       messages: [
-        { role: 'system', content: `You're a smart NPC in Roblox who remembers personal info and helps players.` },
+        { role: 'system', content: "You're a helpful NPC assistant in a Roblox game." },
         { role: 'user', content: `Player memory: ${memory}` },
         { role: 'user', content: message }
       ]
@@ -88,9 +91,4 @@ app.post('/chat', async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
-});
-
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => {
-  console.log(`Listening on port ${PORT}`);
 });
