@@ -2,40 +2,54 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const fs = require('fs');
 const path = require('path');
+const { Configuration, OpenAIApi } = require('openai');
 
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
-// Folder for storing user data
+// Initialize OpenAI client with your API key from environment variables
+const configuration = new Configuration({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+const openai = new OpenAIApi(configuration);
+
+// Folder for storing user data files
 const dataFolder = path.resolve(__dirname, 'PublicUserPrivateData');
 if (!fs.existsSync(dataFolder)) {
   fs.mkdirSync(dataFolder, { recursive: true });
 }
 
-// Simple GET test route to verify server is alive
+// Simple GET route to test server health
 app.get('/ping', (req, res) => {
   res.json({ message: "pong" });
 });
 
-// /chat endpoint - dummy reply for testing
-app.post('/chat', (req, res) => {
+// POST /chat - send user messages to OpenAI and return the reply
+app.post('/chat', async (req, res) => {
   const { userId, messages } = req.body;
   if (!userId || !messages) {
     return res.status(400).json({ error: 'Missing userId or messages' });
   }
 
-  const lastUserMessage = messages.filter(m => m.role === 'user').pop();
-  const replyText = lastUserMessage
-    ? `Echo: ${lastUserMessage.content}`
-    : "Hello from backend!";
+  try {
+    const completion = await openai.createChatCompletion({
+      model: "gpt-4o-mini", // Change model if you want
+      messages: messages,
+    });
 
-  console.log(`Chat from user ${userId}:`, lastUserMessage?.content);
-  res.json({ message: replyText });
+    const replyText = completion.data.choices[0].message.content;
+    console.log(`ChatGPT reply for user ${userId}:`, replyText);
+
+    res.json({ message: replyText });
+  } catch (err) {
+    console.error("OpenAI API error:", err);
+    res.status(500).json({ error: "OpenAI request failed" });
+  }
 });
 
-// /save endpoint - saves user messages to file
+// POST /save - save user conversation memory to disk
 app.post('/save', (req, res) => {
   const { userId, messages } = req.body;
   if (!userId || !messages) {
@@ -47,7 +61,7 @@ app.post('/save', (req, res) => {
 
   try {
     fs.writeFileSync(userFile, dataString, 'utf-8');
-    console.log(`Saved data for user ${userId}`);
+    console.log(`Saved memory for user ${userId}`);
     res.json({ success: true });
   } catch (err) {
     console.error('Save error:', err);
@@ -55,7 +69,7 @@ app.post('/save', (req, res) => {
   }
 });
 
-// /load endpoint - loads user messages from file
+// POST /load - load user conversation memory from disk
 app.post('/load', (req, res) => {
   const { userId } = req.body;
   if (!userId) {
@@ -70,7 +84,7 @@ app.post('/load', (req, res) => {
   try {
     const dataString = fs.readFileSync(userFile, 'utf-8');
     const messages = JSON.parse(dataString);
-    console.log(`Loaded data for user ${userId}`);
+    console.log(`Loaded memory for user ${userId}`);
     res.json({ messages });
   } catch (err) {
     console.error('Load error:', err);
