@@ -1,123 +1,113 @@
 const express = require("express");
-const bodyParser = require("body-parser");
-const fetch = require("node-fetch");
 const fs = require("fs");
 const path = require("path");
 require("dotenv").config();
+const { OpenAI } = require("openai");
 
 const app = express();
-const PORT = process.env.PORT || 10000;
-const MEMORY_FOLDER = path.join(__dirname, "PublicUserPrivateData");
+const port = process.env.PORT || 10000;
 
-app.use(bodyParser.json());
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
-// Ensure memory folder exists
-if (!fs.existsSync(MEMORY_FOLDER)) {
-    fs.mkdirSync(MEMORY_FOLDER, { recursive: true });
+app.use(express.json());
+
+const DATA_DIR = path.join(__dirname, "PublicUserPrivateData");
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR);
 }
 
-// POST /chat – sends messages to OpenAI and returns response
+// Chat endpoint
 app.post("/chat", async (req, res) => {
-    const { messages, userId } = req.body;
-    if (!messages || !userId) return res.status(400).json({ error: "Missing messages or userId" });
+  try {
+    const { userId, messages } = req.body;
+    let memoryText = "";
+    const memoryFile = path.join(DATA_DIR, `${userId}.txt`);
 
-    try {
-        const response = await fetch("https://api.openai.com/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                model: "gpt-4o",
-                messages: messages,
-                temperature: 0.7
-            })
-        });
-
-        const data = await response.json();
-        if (data.error) return res.status(500).json({ error: data.error });
-
-        res.json({ content: data.choices[0].message.content });
-    } catch (err) {
-        console.error("Chat error:", err);
-        res.status(500).json({ error: "Chat failed" });
+    if (fs.existsSync(memoryFile)) {
+      memoryText = fs.readFileSync(memoryFile, "utf-8");
     }
+
+    const fullMessages = [
+      {
+        role: "system",
+        content:
+          "You are ChatGPT helping a Roblox player. Remember this memory:\n" +
+          memoryText,
+      },
+      ...messages,
+    ];
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: fullMessages,
+      temperature: 0.7,
+    });
+
+    const reply = completion.choices[0].message.content;
+    res.json({ reply });
+  } catch (error) {
+    console.error("Chat error:", error);
+    res.status(500).json({ error: "Chat failed" });
+  }
 });
 
-// POST /save – saves memory for a specific user
+// Save endpoint
 app.post("/save", (req, res) => {
+  try {
     const { userId, memory } = req.body;
-    if (!userId || !memory) return res.status(400).json({ error: "Missing userId or memory" });
-
-    try {
-        const filePath = path.join(MEMORY_FOLDER, `${userId}.json`);
-        fs.writeFileSync(filePath, JSON.stringify(memory, null, 2));
-        res.json({ success: true });
-    } catch (err) {
-        console.error("Save error:", err);
-        res.status(500).json({ error: "Save failed" });
-    }
+    const filePath = path.join(DATA_DIR, `${userId}.txt`);
+    fs.writeFileSync(filePath, memory, "utf-8");
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Save error:", error);
+    res.status(500).json({ error: "Save failed" });
+  }
 });
 
-// GET /load?userId=... – loads memory for a specific user
-app.get("/load", (req, res) => {
-    const userId = req.query.userId;
-    if (!userId) return res.status(400).json({ error: "Missing userId" });
-
-    try {
-        const filePath = path.join(MEMORY_FOLDER, `${userId}.json`);
-        if (!fs.existsSync(filePath)) return res.status(404).json({ error: "No memory found" });
-
-        const memory = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-        res.json({ memory });
-    } catch (err) {
-        console.error("Load error:", err);
-        res.status(500).json({ error: "Load failed" });
+// Load endpoint
+app.post("/load", (req, res) => {
+  try {
+    const { userId } = req.body;
+    const filePath = path.join(DATA_DIR, `${userId}.txt`);
+    if (!fs.existsSync(filePath)) {
+      return res.json({ memory: "" });
     }
+    const data = fs.readFileSync(filePath, "utf-8");
+    res.json({ memory: data });
+  } catch (error) {
+    console.error("Load error:", error);
+    res.status(500).json({ error: "Load failed" });
+  }
 });
 
-// POST /summarize – summarizes user memory
+// Summarize endpoint
 app.post("/summarize", async (req, res) => {
-    const { memory, userId } = req.body;
-    if (!memory || !userId) return res.status(400).json({ error: "Missing memory or userId" });
+  try {
+    const { userId, memory } = req.body;
+    const promptMessages = [
+      {
+        role: "system",
+        content:
+          "Summarize this memory concisely for future interactions:",
+      },
+      { role: "user", content: memory },
+    ];
 
-    try {
-        const response = await fetch("https://api.openai.com/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                model: "gpt-4o",
-                messages: [
-                    {
-                        role: "system",
-                        content: "Summarize this player's memory concisely but keep important details for continuing future conversations. Output JSON only."
-                    },
-                    {
-                        role: "user",
-                        content: JSON.stringify(memory)
-                    }
-                ],
-                temperature: 0.5
-            })
-        });
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: promptMessages,
+    });
 
-        const data = await response.json();
-        if (data.error) return res.status(500).json({ error: data.error });
-
-        const summarized = data.choices[0].message.content;
-        const filePath = path.join(MEMORY_FOLDER, `${userId}.json`);
-        fs.writeFileSync(filePath, summarized);
-        res.json({ summary: summarized });
-    } catch (err) {
-        console.error("Summarize error:", err);
-        res.status(500).json({ error: "Summarize failed" });
-    }
+    const summarized = completion.choices[0].message.content;
+    res.json({ summary: summarized });
+  } catch (error) {
+    console.error("Summarize error:", error);
+    res.status(500).json({ error: "Summarization failed" });
+  }
 });
 
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
 });
