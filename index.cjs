@@ -1,69 +1,89 @@
 const express = require("express");
-const bodyParser = require("body-parser");
 const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
 const { OpenAI } = require("openai");
+require("dotenv").config();
 
 const app = express();
-const PORT = process.env.PORT || 10000;
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const port = process.env.PORT || 10000;
 
 app.use(cors());
-app.use(bodyParser.json());
+app.use(express.json());
 
-// Ensure the memory folder exists
-const memoryFolder = path.join(__dirname, "PublicUserPrivateData");
-if (!fs.existsSync(memoryFolder)) fs.mkdirSync(memoryFolder);
-
-// -- Chat endpoint
-app.post("/chat", async (req, res) => {
-  const { userId, messages } = req.body;
-  try {
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages,
-    });
-
-    const reply = completion.choices[0].message.content;
-    res.json({ reply });
-  } catch (err) {
-    console.error("Chat error:", err);
-    res.status(500).send("Error with GPT chat");
-  }
+// GPT client
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY, // Set this in your Render environment settings
 });
 
-// -- Summarize endpoint
+// Save memory to local folder
+app.post("/save", (req, res) => {
+  const { userId, memory } = req.body;
+  if (!userId || !memory) {
+    return res.status(400).json({ error: "Missing userId or memory" });
+  }
+
+  const folderPath = path.join(__dirname, "PublicUserPrivateData");
+  if (!fs.existsSync(folderPath)) {
+    fs.mkdirSync(folderPath);
+  }
+
+  const filePath = path.join(folderPath, `${userId}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(memory, null, 2));
+  console.log(`[SAVE] Memory saved for user ${userId}`);
+  res.json({ success: true });
+});
+
+// Load memory from local folder
+app.post("/load", (req, res) => {
+  const { userId } = req.body;
+  if (!userId) {
+    return res.status(400).json({ error: "Missing userId" });
+  }
+
+  const filePath = path.join(__dirname, "PublicUserPrivateData", `${userId}.json`);
+  if (!fs.existsSync(filePath)) {
+    console.log(`[LOAD] No memory found for user ${userId}`);
+    return res.json({ memory: {} });
+  }
+
+  const memory = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+  console.log(`[LOAD] Memory loaded for user ${userId}`);
+  res.json({ memory });
+});
+
+// Summarize memory
 app.post("/summarize", async (req, res) => {
   const { userId, memory } = req.body;
-
-  const system = `You are a memory summarizer for a Roblox AI assistant. Summarize the following JSON memory into a concise, useful summary to help the assistant remember important details.`;
+  if (!userId || !memory) {
+    return res.status(400).json({ error: "Missing userId or memory" });
+  }
 
   try {
-    const completion = await openai.chat.completions.create({
+    const result = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
-        { role: "system", content: system },
-        { role: "user", content: JSON.stringify(memory) },
+        {
+          role: "system",
+          content: "Summarize the user's memory into concise and meaningful bullet points. Keep important details. Don't repeat old summaries.",
+        },
+        {
+          role: "user",
+          content: JSON.stringify(memory),
+        },
       ],
     });
 
-    const summary = completion.choices[0].message.content;
-
-    // Save summarized memory locally
-    const savePath = path.join(memoryFolder, `${userId}.txt`);
-    fs.writeFileSync(savePath, summary);
-
-    res.json({ summarizedMemory: summary });
+    const summarized = result.choices[0].message.content;
+    console.log(`[SUMMARIZE] Memory summarized for user ${userId}`);
+    res.json({ summarizedMemory: summarized });
   } catch (err) {
-    console.error("Summarize error:", err);
-    res.status(404).send("Failed to summarize");
+    console.error(`[SUMMARIZE] Failed for user ${userId}:`, err);
+    res.status(500).json({ error: "Failed to summarize memory" });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+// Start the server
+app.listen(port, () => {
+  console.log(`Backend listening on port ${port}`);
 });
