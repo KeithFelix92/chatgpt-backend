@@ -1,47 +1,83 @@
 const express = require('express');
-const cors = require('cors');
+const bodyParser = require('body-parser');
 const fs = require('fs');
-const { ChatOpenAI } = require('@langchain/openai');
-const { HumanMessage } = require('@langchain/core/messages');
-require('dotenv').config();
+const path = require('path');
 
 const app = express();
-const port = 10000;
+const port = process.env.PORT || 3000;
 
-app.use(cors());
-app.use(express.json());
+app.use(bodyParser.json());
 
-const memoryPath = './PublicUserPrivateData';
+// Folder for storing user data
+const dataFolder = path.resolve(__dirname, 'PublicUserPrivateData');
+if (!fs.existsSync(dataFolder)) {
+  fs.mkdirSync(dataFolder, { recursive: true });
+}
 
-const model = new ChatOpenAI({
-  modelName: "gpt-4o-mini",
-  temperature: 0.7
+// Simple GET test route to verify server is alive
+app.get('/ping', (req, res) => {
+  res.json({ message: "pong" });
 });
 
-app.post('/chat', async (req, res) => {
+// /chat endpoint - dummy reply for testing
+app.post('/chat', (req, res) => {
+  const { userId, messages } = req.body;
+  if (!userId || !messages) {
+    return res.status(400).json({ error: 'Missing userId or messages' });
+  }
+
+  const lastUserMessage = messages.filter(m => m.role === 'user').pop();
+  const replyText = lastUserMessage
+    ? `Echo: ${lastUserMessage.content}`
+    : "Hello from backend!";
+
+  console.log(`Chat from user ${userId}:`, lastUserMessage?.content);
+  res.json({ message: replyText });
+});
+
+// /save endpoint - saves user messages to file
+app.post('/save', (req, res) => {
+  const { userId, messages } = req.body;
+  if (!userId || !messages) {
+    return res.status(400).json({ error: 'Missing userId or messages' });
+  }
+
+  const userFile = path.join(dataFolder, `${userId}.txt`);
+  const dataString = JSON.stringify(messages, null, 2);
+
   try {
-    const { userId, messages } = req.body;
-    if (!userId || !messages) return res.status(400).json({ error: "Missing userId or messages" });
-
-    const memoryFile = `${memoryPath}/${userId}.txt`;
-    let pastMemory = "";
-
-    if (fs.existsSync(memoryFile)) {
-      pastMemory = fs.readFileSync(memoryFile, 'utf8');
-    }
-
-    const fullPrompt = `${pastMemory}\n\nUser: ${messages[0].content}`;
-    const response = await model.invoke([new HumanMessage(fullPrompt)]);
-    const reply = response.content;
-
-    fs.writeFileSync(memoryFile, `${pastMemory}\nUser: ${messages[0].content}\nAssistant: ${reply}`, 'utf8');
-    res.json({ reply });
+    fs.writeFileSync(userFile, dataString, 'utf-8');
+    console.log(`Saved data for user ${userId}`);
+    res.json({ success: true });
   } catch (err) {
-    console.error("Chat error:", err);
-    res.status(500).json({ error: "Failed to process message" });
+    console.error('Save error:', err);
+    res.status(500).json({ error: 'Failed to save user data' });
+  }
+});
+
+// /load endpoint - loads user messages from file
+app.post('/load', (req, res) => {
+  const { userId } = req.body;
+  if (!userId) {
+    return res.status(400).json({ error: 'Missing userId' });
+  }
+
+  const userFile = path.join(dataFolder, `${userId}.txt`);
+  if (!fs.existsSync(userFile)) {
+    return res.json({ messages: [] });
+  }
+
+  try {
+    const dataString = fs.readFileSync(userFile, 'utf-8');
+    const messages = JSON.parse(dataString);
+    console.log(`Loaded data for user ${userId}`);
+    res.json({ messages });
+  } catch (err) {
+    console.error('Load error:', err);
+    res.status(500).json({ error: 'Failed to load user data' });
   }
 });
 
 app.listen(port, () => {
-  console.log(`ChatGPT backend listening on port ${port}`);
+  console.log(`Server listening on port ${port}`);
 });
