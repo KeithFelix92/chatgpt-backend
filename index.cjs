@@ -4,92 +4,106 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
-require('dotenv').config();
-
 const { OpenAI } = require('openai');
+
+const app = express();
+const port = process.env.PORT || 10000;
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT || 10000;
-const MEMORY_FOLDER = path.join(__dirname, 'PublicUserPrivateData');
-
-// Make sure memory folder exists
-if (!fs.existsSync(MEMORY_FOLDER)) {
-  fs.mkdirSync(MEMORY_FOLDER, { recursive: true });
-}
-
-// Load memory file for a user
-function loadMemory(userId) {
-  const filePath = path.join(MEMORY_FOLDER, `${userId}.txt`);
-  if (fs.existsSync(filePath)) {
-    return fs.readFileSync(filePath, 'utf8');
+// Summarize helper function
+async function summarizeMemory(memoryText) {
+  if (!memoryText || memoryText.trim() === "") {
+    return "";
   }
-  return '';
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: "Summarize the following player memory briefly." },
+        { role: "user", content: memoryText }
+      ],
+      max_tokens: 300,
+    });
+    return completion.choices[0].message.content.trim();
+  } catch (err) {
+    console.error("Summarize failed:", err);
+    return "";
+  }
 }
 
-// Save memory file for a user
-function saveMemory(userId, memoryText) {
-  const filePath = path.join(MEMORY_FOLDER, `${userId}.txt`);
-  fs.writeFileSync(filePath, memoryText, 'utf8');
-}
-
-// /chat endpoint
+// === /chat route ===
+// Expects: { messages: [...], userId: "123" }
 app.post('/chat', async (req, res) => {
   const { messages, userId } = req.body;
-
-  if (!Array.isArray(messages) || !userId) {
+  if (!userId || !Array.isArray(messages)) {
     return res.status(400).json({ reply: 'Missing userId or messages array' });
   }
 
   try {
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o', // or 'gpt-3.5-turbo' if using free tier
-      messages: messages,
+      model: 'gpt-4o',
+      messages,
     });
-
     const reply = completion.choices[0].message.content;
     res.json({ reply });
   } catch (error) {
-    console.error('Chat Error:', error.message);
-    res.status(500).json({ reply: 'Error generating reply' });
+    console.error("OpenAI Chat Error:", error);
+    res.status(500).json({ reply: 'Failed to generate response' });
   }
 });
 
-// /load endpoint
-app.post('/load', (req, res) => {
-  const { userId } = req.body;
-
-  if (!userId) {
-    return res.status(400).json({ memory: '' });
-  }
-
-  const memory = loadMemory(userId);
-  res.json({ memory });
-});
-
-// /save endpoint
-app.post('/save', (req, res) => {
-  const { userId, memory } = req.body;
-
-  if (!userId || typeof memory !== 'string') {
-    return res.status(400).json({ message: 'Missing userId or memory' });
-  }
+// === /load/:userId route ===
+app.get('/load/:userId', (req, res) => {
+  const userId = req.params.userId;
+  const filePath = path.join(__dirname, 'PublicUserPrivateData', `${userId}.json`);
 
   try {
-    saveMemory(userId, memory);
-    res.json({ message: 'Memory saved successfully' });
+    if (!fs.existsSync(filePath)) {
+      return res.json({ memory: null });
+    }
+    const data = fs.readFileSync(filePath, 'utf8');
+    res.json({ memory: JSON.parse(data) });
   } catch (error) {
-    console.error('Save Error:', error.message);
-    res.status(500).json({ message: 'Failed to save memory' });
+    console.error("Load Error:", error);
+    res.status(500).json({ reply: 'Failed to load memory' });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`✅ ChatGPT backend listening on port ${PORT}`);
+// === /save route ===
+// Expects: { userId: "123", memory: {...} }
+app.post('/save', async (req, res) => {
+  const { userId, memory } = req.body;
+  if (!userId || !memory) {
+    return res.status(400).json({ reply: 'Missing userId or memory' });
+  }
+
+  // Summarize memory before saving
+  let summarizedMemory = memory;
+  try {
+    const memoryText = JSON.stringify(memory);
+    const summary = await summarizeMemory(memoryText);
+    summarizedMemory = { summary, fullMemory: memory };
+  } catch (e) {
+    console.error("Summarization failed:", e);
+  }
+
+  const filePath = path.join(__dirname, 'PublicUserPrivateData', `${userId}.json`);
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify(summarizedMemory, null, 2));
+    res.json({ reply: 'Memory saved' });
+  } catch (error) {
+    console.error("Save Error:", error);
+    res.status(500).json({ reply: 'Failed to save memory' });
+  }
+});
+
+app.listen(port, () => {
+  console.log(`✅ ChatGPT backend running on port ${port}`);
 });
