@@ -2,18 +2,17 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const fs = require('fs');
 const path = require('path');
-const { Configuration, OpenAIApi } = require('openai');
+const OpenAI = require('openai');
 
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
-// Initialize OpenAI client with your API key from environment variables
-const configuration = new Configuration({
+// Initialize OpenAI client with API key from environment
+const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
-const openai = new OpenAIApi(configuration);
 
 // Folder for storing user data files
 const dataFolder = path.resolve(__dirname, 'PublicUserPrivateData');
@@ -21,12 +20,12 @@ if (!fs.existsSync(dataFolder)) {
   fs.mkdirSync(dataFolder, { recursive: true });
 }
 
-// Simple GET route to test server health
+// Health check endpoint
 app.get('/ping', (req, res) => {
   res.json({ message: "pong" });
 });
 
-// POST /chat - send user messages to OpenAI and return the reply
+// POST /chat endpoint - call OpenAI chat completion
 app.post('/chat', async (req, res) => {
   const { userId, messages } = req.body;
   if (!userId || !messages) {
@@ -34,12 +33,12 @@ app.post('/chat', async (req, res) => {
   }
 
   try {
-    const completion = await openai.createChatCompletion({
-      model: "gpt-4o-mini", // Change model if you want
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",  // replace with your desired model
       messages: messages,
     });
 
-    const replyText = completion.data.choices[0].message.content;
+    const replyText = completion.choices[0].message.content;
     console.log(`ChatGPT reply for user ${userId}:`, replyText);
 
     res.json({ message: replyText });
@@ -49,7 +48,7 @@ app.post('/chat', async (req, res) => {
   }
 });
 
-// POST /save - save user conversation memory to disk
+// POST /save - save user messages to disk
 app.post('/save', (req, res) => {
   const { userId, messages } = req.body;
   if (!userId || !messages) {
@@ -69,7 +68,7 @@ app.post('/save', (req, res) => {
   }
 });
 
-// POST /load - load user conversation memory from disk
+// POST /load - load user messages from disk
 app.post('/load', (req, res) => {
   const { userId } = req.body;
   if (!userId) {
